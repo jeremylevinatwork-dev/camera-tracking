@@ -111,6 +111,13 @@ document.getElementById('pinInput').addEventListener('keypress',e=>{ if(e.key===
 try{ if(sessionStorage.getItem('camAuth')==='1'){ document.getElementById('loginOverlay').style.display='none'; document.getElementById('logoutBtn').style.display='block'; } }catch(e){}
 // Single sign-on from Loews portal
 try{ if(localStorage.getItem('loewsAuth')==='1'){ document.getElementById('loginOverlay').style.display='none'; document.getElementById('logoutBtn').style.display='block'; try{sessionStorage.setItem('camAuth','1');}catch(e){} } }catch(e){}
+try{
+if(window.self!==window.top){
+var st=document.createElement('style');
+st.textContent='#logoutBtn{display:none!important}';
+document.head.appendChild(st);
+}
+}catch(e){}
 </script>
 
 <div class="header"><div style="display:flex;justify-content:center;align-items:center;gap:16px;margin-bottom:10px;"><img src="loews-logo.jpg" alt="Loews Hotels & Co" style="max-height:45px;max-width:140px;background:white;padding:6px;border-radius:6px;"><img src="sciens-logo.jpg" alt="Sciens Building Solutions" style="max-height:45px;max-width:140px;background:white;padding:6px;border-radius:6px;"></div><h1>📷 Camera Tracking</h1><p>Loews Security Systems</p><div class="gold-bar"></div></div>
