@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-build="cam-20261024-1151">
+<html lang="en" data-build="cam-20261028-1420">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -94,6 +94,7 @@ function showLoginLog(){
 }
 
 function doLogout(){
+  try{ usageEnd(); }catch(e){}
   try{ sessionStorage.removeItem('camAuth'); sessionStorage.removeItem('camUser'); }catch(e){}
   try{ localStorage.removeItem('loewsAuth'); localStorage.removeItem('loewsUser'); }catch(e){}
   location.reload();
@@ -109,6 +110,7 @@ function doLogin(){
     try{
       sessionStorage.setItem('camAuth','1'); 
       sessionStorage.setItem('camUser',n);
+      try{ usageStart(); }catch(e){}
       // Record login history
       const log = JSON.parse(localStorage.getItem('camLoginLog')||'[]');
       log.unshift({name:n, at:new Date().toISOString()});
@@ -1079,6 +1081,71 @@ function camExcelHtml(list, subj){
   return h;
 }
 function camUserName(){ var a='', b=''; try{ a=sessionStorage.getItem('camUser')||''; }catch(e){} try{ b=localStorage.getItem('loewsUser')||''; }catch(e){} return (a||b).trim(); }
+/* === USAGE LOG (writes to the shared usage-log row; Jeremy views it in Secure Alert) === */
+var usageEntry = null;
+function usageDevice(){
+  const ua = navigator.userAgent || '';
+  let t = 'Computer', d = 'Computer';
+  if(/iPhone/.test(ua)){ t = 'Phone'; d = 'iPhone'; }
+  else if(/iPad/.test(ua)){ t = 'Tablet'; d = 'iPad'; }
+  else if(/Android/.test(ua)){ if(/Mobile/.test(ua)){ t = 'Phone'; d = 'Android phone'; } else { t = 'Tablet'; d = 'Android tablet'; } }
+  else if(/Windows/.test(ua)){ d = 'Windows PC'; }
+  else if(/Macintosh|Mac OS/.test(ua)){ d = 'Mac'; }
+  let b = '';
+  if(/Edg\//.test(ua)) b = 'Edge'; else if(/CriOS|Chrome/.test(ua)) b = 'Chrome'; else if(/FxiOS|Firefox/.test(ua)) b = 'Firefox'; else if(/Safari/.test(ua)) b = 'Safari';
+  return { t: t, d: d + (b ? ' \u00B7 ' + b : '') };
+}
+async function usageWrite(){
+  if(!usageEntry) return;
+  try{
+    const r = await fetch(SUPABASE_URL + '/rest/v1/app_records?id=eq.usage-log&select=data', { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+    const rows = await r.json();
+    let es = (rows && rows[0] && rows[0].data && Array.isArray(rows[0].data.entries)) ? rows[0].data.entries : [];
+    const copy = JSON.parse(JSON.stringify(usageEntry));
+    const i = es.findIndex(e=>e.id === usageEntry.id);
+    if(i >= 0) es[i] = copy; else es.push(copy);
+    const cut = Date.now() - 120 * 864e5;
+    es = es.filter(e=>new Date(e.last).getTime() > cut).slice(-400);
+    await fetch(SUPABASE_URL + '/rest/v1/app_records', { method: 'POST', keepalive: true,
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify({ id: 'usage-log', app: 'camera', data: { entries: es, _ts: Date.now() } }) });
+  }catch(e){}
+}
+function usageStart(){
+  const nm = camUserName();
+  if(!nm) return;
+  try{
+    const savedId = sessionStorage.getItem('cusgId'), savedStart = sessionStorage.getItem('cusgStart'), savedMins = parseInt(sessionStorage.getItem('cusgMins') || '0', 10) || 0;
+    if(savedId && savedStart){
+      const dv = usageDevice();
+      usageEntry = { id: savedId, name: nm, app: 'Cameras', start: savedStart, last: new Date().toISOString(), mins: savedMins, type: dv.t, device: dv.d, via: 'App' };
+      usageWrite();
+      return;
+    }
+  }catch(e){}
+  const dv = usageDevice();
+  usageEntry = { id: 'u-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7), name: nm, app: 'Cameras', start: new Date().toISOString(), last: new Date().toISOString(), mins: 0, type: dv.t, device: dv.d, via: 'App' };
+  try{ sessionStorage.setItem('cusgId', usageEntry.id); sessionStorage.setItem('cusgStart', usageEntry.start); sessionStorage.setItem('cusgMins', '0'); }catch(e){}
+  usageWrite();
+}
+window.usageTick = ()=>{
+  if(!usageEntry || !camUserName()) return;
+  usageEntry.last = new Date().toISOString();
+  if(!document.hidden){ usageEntry.mins += 1; try{ sessionStorage.setItem('cusgMins', String(usageEntry.mins)); }catch(e){} }
+  usageWrite();
+};
+setInterval(()=>{ try{ window.usageTick(); }catch(e){} }, 60000);
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden && usageEntry){ usageEntry.last = new Date().toISOString(); usageWrite(); } });
+function usageEnd(){
+  if(!usageEntry) return;
+  usageEntry.last = new Date().toISOString();
+  usageWrite();
+  usageEntry = null;
+  try{ sessionStorage.removeItem('cusgId'); sessionStorage.removeItem('cusgStart'); sessionStorage.removeItem('cusgMins'); }catch(e){}
+}
+setTimeout(()=>{ try{ if(camUserName()) usageStart(); }catch(e){} }, 1500);
+/* === END USAGE LOG === */
+
 function mailNeedsApproval(){ return /duff/i.test(camUserName()); }
 function canApproveMail(){ return camUserName() === 'Jeremy Levin'; }
 function queueCamMail(item){
@@ -1109,7 +1176,7 @@ async function approveMail(uid){
   const q = camMailQueue.find(x=>x.uid===uid); if(!q) return;
   let res = null;
   if(q.kind === 'quote'){
-    let okc = 0; const tos = ['Sean.forester@loewshotels.com', 'Jeremy.levin@loewshotels.com'];
+    let okc = 0; const tos = ['Jeremy.levin@loewshotels.com'];
     for(const to of tos){ try{ const r = await fetch('https://api.emailjs.com/api/v1.0/email/send', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({service_id:CAM_EJ_SERVICE, template_id:CAM_EJ_TEMPLATE, user_id:CAM_EJ_KEY, template_params:{to_email:to, subject:q.mail.subj, body:q.mail.body, message:q.mail.body}})}); if(r.ok) okc++; }catch(e){} }
     res = { ok: okc > 0 };
   } else {
