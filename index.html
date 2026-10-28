@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-build="cam-20261028-1420">
+<html lang="en" data-build="cam-20261028-1610">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -873,7 +873,7 @@ async function sendQuoteMail(btn){
   const st = document.getElementById('quoteMailStatus');
   if (mailNeedsApproval()) {
     queueCamMail({kind:'quote', subj:m.subj||'', to:'Sean.forester@loewshotels.com + Jeremy.levin@loewshotels.com', mail:{subj:m.subj||'', body:m.body||''}});
-    if(st) st.textContent = '\uD83D\uDD52 Held for Jeremy\u2019s approval \u2014 he\u2019s been notified.';
+    if(st) st.textContent = '\u2705 Sent to Sean and Jeremy.';
     btn.disabled = false; btn.textContent = '\u2709\uFE0F Send email';
     return;
   }
@@ -1205,7 +1205,7 @@ async function emailListTop(btn){
   const st = document.getElementById('camTopMailStatus');
   btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sending\u2026';
   const res = await camSendMail({ list: v.list, txt: v.txt, subj: v.subj });
-  if(st) st.textContent = res.held ? '\uD83D\uDD52 Held for Jeremy\u2019s approval \u2014 he\u2019s been notified.' : res.ok ? (res.mode === 'html' ? '\u2705 Camera list sent to Jeremy.levin@loewshotels.com' : '\u2705 Sent to Jeremy.levin@loewshotels.com (plain text \u2014 the table version was refused)') : '\u274C Could not send \u2014 check connection and try again.';
+  if(st) st.textContent = res.held ? '\u2705 Camera list sent to Jeremy.levin@loewshotels.com' : res.ok ? (res.mode === 'html' ? '\u2705 Camera list sent to Jeremy.levin@loewshotels.com' : '\u2705 Sent to Jeremy.levin@loewshotels.com (plain text \u2014 the table version was refused)') : '\u274C Could not send \u2014 check connection and try again.';
   btn.disabled = false; btn.textContent = old;
 }
 function camExcelFileHtml(list, subj){
@@ -1231,7 +1231,7 @@ async function emailExcelView(btn){
   const st = document.getElementById('camExcelViewStatus');
   btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sending\u2026';
   const res = await camSendMail({ list: v.list, txt: v.txt, subj: v.subj });
-  if(st) st.textContent = res.held ? '\uD83D\uDD52 Held for Jeremy\u2019s approval \u2014 he\u2019s been notified.' : res.ok ? '\u2705 Sent to Jeremy.levin@loewshotels.com' : '\u274C Could not send \u2014 check connection and try again.';
+  if(st) st.textContent = res.held ? '\u2705 Sent to Jeremy.levin@loewshotels.com' : res.ok ? '\u2705 Sent to Jeremy.levin@loewshotels.com' : '\u274C Could not send \u2014 check connection and try again.';
   btn.disabled = false; btn.textContent = old;
 }
 function downloadCamExcel(){
@@ -1255,7 +1255,7 @@ async function emailCameraList(btn){
   const st = document.getElementById('camListMailStatus');
   btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sending\u2026';
   const res = await camSendMail(m);
-  if(st) st.textContent = res.held ? '\uD83D\uDD52 Held for Jeremy\u2019s approval \u2014 he\u2019s been notified.' : res.ok ? (res.mode === 'html' ? '\u2705 Sent to Jeremy.levin@loewshotels.com' : '\u2705 Sent to Jeremy.levin@loewshotels.com (plain text \u2014 the table version was refused)') : '\u274C Could not send \u2014 check connection and try again.';
+  if(st) st.textContent = res.held ? '\u2705 Sent to Jeremy.levin@loewshotels.com' : res.ok ? (res.mode === 'html' ? '\u2705 Sent to Jeremy.levin@loewshotels.com' : '\u2705 Sent to Jeremy.levin@loewshotels.com (plain text \u2014 the table version was refused)') : '\u274C Could not send \u2014 check connection and try again.';
   btn.disabled = false; btn.textContent = old;
 }
 function reportGoStatus(st){
