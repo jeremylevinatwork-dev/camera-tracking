@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-build="cam-20261108-0955">
+<html lang="en" data-build="cam-20261108-1055">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -229,6 +229,7 @@ async function loadCameras() {
     else if(localCams.length > cloudCams.length + 5 && localTs > cloudTs){ cameras = localCams; camTs = localTs; }
     else { cameras = cloudCams; camTs = cloudTs; }
     if(Array.isArray(data.mailQueue)) camMailQueue = data.mailQueue;
+    if(Array.isArray(data.photoHolds)) camPhotoHolds = data.photoHolds;
     try { localStorage.setItem('camera_cache', JSON.stringify(cameras)); localStorage.setItem('camera_cache_ts', String(camTs)); } catch(e) {}
     statusEl.textContent = `Online — ${cameras.length} cameras`; statusEl.className = 'status online';
   } catch(err) {
@@ -252,7 +253,7 @@ function render() {
   let orderedKeys = HOTEL_ORDER.filter(h=> unfiltered || byHotel[h]);
   Object.keys(byHotel).sort().forEach(h=>{ if(!orderedKeys.includes(h)) orderedKeys.push(h); });
   if(unfiltered) HOTEL_ORDER.forEach(h=>{ if(!byHotel[h]) byHotel[h]=[]; });
-  let html = mailApprovalCard() + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 8px;padding:0 8px;">';
+  let html = photoHoldsCard() + mailApprovalCard() + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 8px;padding:0 8px;">';
   orderedKeys.forEach(h=>{
     const list = byHotel[h].sort((a,b)=>(a.cameraId||'').localeCompare(b.cameraId||''));
     html += `<div class="hotel-section${expandedHotels.has(h)?' expanded':''}" id="hotel-${h}"><div class="hotel-header" onclick="toggleHotel('${h}')"><span>${h}</span><span class="hotel-count">${list.length}</span></div><div class="hotel-body">${bulkMode?`<div style="padding:8px 15px 0;background:white;"><button onclick="event.stopPropagation();selectHotel(\'${h}\',true)" style="padding:6px 12px;background:#2d4a7a;color:white;border:none;border-radius:6px;font-size:13.5px;cursor:pointer;margin-right:8px;">Select All</button><button onclick="event.stopPropagation();selectHotel(\'${h}\',false)" style="padding:6px 12px;background:#666;color:white;border:none;border-radius:6px;font-size:13.5px;cursor:pointer;">Clear</button></div>`:``}<div class="camera-grid">`;
@@ -551,6 +552,113 @@ async function externalizeCamPhotos(list){
     }
   }
 }
+
+// --- Duff photo hold (2026-11-08): Alexander Duff's photos stay off the shared
+// state until Jeremy approves; on Duff's device they look posted (device-local).
+let camPhotoHolds = [];
+function camMe(){
+  var a = '', b = '';
+  try{ a = sessionStorage.getItem('camUser') || ''; }catch(e){}
+  try{ b = localStorage.getItem('loewsUser') || ''; }catch(e){}
+  return a || b || '';
+}
+function localCamFiles(uid){
+  try{ var m = JSON.parse(localStorage.getItem('cam-held-files') || '{}'); return m[uid] || []; }catch(e){ return []; }
+}
+function stashCamFile(uid, file){
+  try{
+    var m = JSON.parse(localStorage.getItem('cam-held-files') || '{}');
+    if(!m[uid]) m[uid] = [];
+    var f = Object.assign({}, file);
+    f.hid = 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    m[uid].push(f);
+    localStorage.setItem('cam-held-files', JSON.stringify(m));
+  }catch(e){}
+}
+function removeLocalCamFile(uid, j){
+  try{
+    var m = JSON.parse(localStorage.getItem('cam-held-files') || '{}');
+    var arr = m[uid] || [];
+    var gone = arr[j];
+    arr.splice(j, 1);
+    m[uid] = arr;
+    localStorage.setItem('cam-held-files', JSON.stringify(m));
+    if(gone && gone.hid && camPhotoHolds.some(function(h){ return h.hid === gone.hid; })){
+      var un = [];
+      try{ un = JSON.parse(localStorage.getItem('cam-unheld') || '[]'); }catch(e){}
+      if(un.indexOf(gone.hid) < 0) un.push(gone.hid);
+      try{ localStorage.setItem('cam-unheld', JSON.stringify(un)); }catch(e){}
+      saveToCloud();
+    }
+  }catch(e){}
+  refreshFileList(uid);
+}
+function camHoldsGone(){
+  try{ return JSON.parse(localStorage.getItem('cam-holds-gone') || '[]'); }catch(e){ return []; }
+}
+function markCamHoldGone(hid){
+  var g = camHoldsGone();
+  if(g.indexOf(hid) < 0){ g.push(hid); try{ localStorage.setItem('cam-holds-gone', JSON.stringify(g)); }catch(e){} }
+}
+async function syncCamPhotoHolds(cur){
+  var gone = camHoldsGone();
+  var cloud = (cur && Array.isArray(cur.photoHolds)) ? cur.photoHolds : [];
+  var known = {};
+  camPhotoHolds.forEach(function(h){ known[h.hid] = 1; });
+  cloud.forEach(function(h){ if(!known[h.hid] && gone.indexOf(h.hid) < 0) camPhotoHolds.push(h); });
+  camPhotoHolds = camPhotoHolds.filter(function(h){ return gone.indexOf(h.hid) < 0; });
+  var m = {};
+  try{ m = JSON.parse(localStorage.getItem('cam-held-files') || '{}'); }catch(e){}
+  var uids = Object.keys(m);
+  for(var i = 0; i < uids.length; i++){
+    var arr = m[uids[i]] || [];
+    for(var j = 0; j < arr.length; j++){
+      var lf = arr[j];
+      if(lf && typeof lf.data === 'string' && lf.data.indexOf('data:') === 0){
+        var ref = await photoPut(lf.data);
+        if(ref) lf.data = ref;
+      }
+      if(lf && lf.hid && !camPhotoHolds.some(function(h){ return h.hid === lf.hid; }) && gone.indexOf(lf.hid) < 0){
+        var cam = cameras.find(function(c){ return c.uid === uids[i]; });
+        camPhotoHolds.push({hid: lf.hid, camUid: uids[i], cameraId: cam ? (cam.cameraId || '') : '', hotel: cam ? (cam.hotel || '') : '', file: {name: lf.name, type: lf.type, size: lf.size, data: lf.data, uploadedAt: lf.uploadedAt || new Date().toISOString(), uploadedBy: 'Alexander Duff'}, by: 'Alexander Duff', ts: Date.now()});
+      }
+    }
+  }
+  try{ localStorage.setItem('cam-held-files', JSON.stringify(m)); }catch(e){}
+  var un = [];
+  try{ un = JSON.parse(localStorage.getItem('cam-unheld') || '[]'); }catch(e){}
+  if(un.length){
+    camPhotoHolds = camPhotoHolds.filter(function(h){ return un.indexOf(h.hid) < 0; });
+    try{ localStorage.removeItem('cam-unheld'); }catch(e){}
+  }
+}
+function photoHoldsCard(){
+  if(!canApproveMail()) return '';
+  if(!camPhotoHolds.length) return '';
+  let h = '<div style="background:#fff8e1;border:2px solid #d4af37;border-radius:14px;padding:14px;margin:0 8px 12px"><div style="font-weight:800;color:#1a365d;font-size:17px">\uD83D\uDCF8 Photos waiting ('+camPhotoHolds.length+')</div>';
+  camPhotoHolds.forEach(function(hd){
+    h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;margin-top:8px"><b>'+escapeHtml(hd.cameraId || 'Camera')+'</b> <span style="color:#4a5568">'+escapeHtml(hd.hotel || '')+'</span><div style="font-size:13px;color:#4a5568">'+escapeHtml((hd.file && hd.file.name) || 'photo')+' &middot; '+new Date(hd.ts).toLocaleString()+'</div>'
+      + (hd.file ? '<div style="margin-top:6px;max-width:220px"><img '+fileImgAttr(hd.file)+' alt="" style="max-width:100%;border-radius:8px;border:1px solid #cbd5e0;"></div>' : '')
+      + '<div style="display:flex;gap:8px;margin-top:8px"><button class="cbtn" style="background:#2f855a;color:#fff;border:none" onclick="approveCamHold(\''+hd.hid+'\')">\u2713 Approve</button><button class="cbtn" onclick="dismissCamHold(\''+hd.hid+'\')">Dismiss</button></div></div>';
+  });
+  return h + '</div>';
+}
+function approveCamHold(hid){
+  const hd = camPhotoHolds.find(function(x){ return x.hid === hid; });
+  if(!hd) return;
+  const cam = cameras.find(function(c){ return c.uid === hd.camUid; });
+  if(cam && hd.file){ if(!cam.files) cam.files = []; cam.files.push(hd.file); }
+  camPhotoHolds = camPhotoHolds.filter(function(x){ return x.hid !== hid; });
+  markCamHoldGone(hid);
+  try{ pushCameras(); }catch(e){}
+  render();
+}
+function dismissCamHold(hid){
+  camPhotoHolds = camPhotoHolds.filter(function(x){ return x.hid !== hid; });
+  markCamHoldGone(hid);
+  try{ pushCameras(); }catch(e){}
+  render();
+}
 var camTs = 0;
 var camLastData = null; // last full cloud row seen (egress gate for the push guard)
 async function pushCameras(){
@@ -573,8 +681,9 @@ async function pushCameras(){
     if(missing.length) cameras = cameras.concat(missing);
   }
   try{ await externalizeCamPhotos(cameras); }catch(e){}
+  try{ await syncCamPhotoHolds(cur); }catch(e){}
   camTs = Date.now();
-  const payload = JSON.stringify({data:{...cur,cameras,mailQueue:camMailQueue,_ts:camTs}});
+  const payload = JSON.stringify({data:{...cur,cameras,mailQueue:camMailQueue,photoHolds:camPhotoHolds,_ts:camTs}});
   let res = null, lastStatus = 0;
   for(let attempt = 0; attempt < 5; attempt++){
     try{
@@ -586,7 +695,8 @@ async function pushCameras(){
   }
   if(!res || !res.ok) throw new Error(lastStatus || 'network');
   try{ localStorage.setItem('camera_cache',JSON.stringify(cameras)); localStorage.setItem('camera_cache_ts',String(camTs)); }catch(e){}
-  camLastData = {...cur, cameras, mailQueue: camMailQueue, _ts: camTs};
+  camLastData = {...cur, cameras, mailQueue: camMailQueue, photoHolds: camPhotoHolds, _ts: camTs};
+  try{ localStorage.removeItem('cam-holds-gone'); }catch(e){}
   return res;
 }
 function canDeleteCamera(){
@@ -639,7 +749,7 @@ async function saveNew(){
   const msg=document.getElementById('saveMsg');
   const cid=document.getElementById('eId').value.trim();
   if(!cid){ msg.textContent='Camera ID is required.'; msg.style.color='red'; return; }
-  const newCam={ uid:'cam-'+Date.now()+'-'+Math.random().toString(36).slice(2,7), cameraId:cid, hotel:document.getElementById('eHotel').value, status:document.getElementById('eStatus').value, location:document.getElementById('eLoc').value.trim(), model:'', notes:document.getElementById('eNotes').value, ticket:document.getElementById('eTicket').value, provider:document.getElementById('eProvider').value, quote:document.getElementById('eQuote').value, lat:pendingPin?pendingPin.lat:null, lng:pendingPin?pendingPin.lng:null, pinTs:pendingPin?pendingPin.ts:null, files:pendingPhoto?[pendingPhoto]:[] };
+  const newCam={ uid:'cam-'+Date.now()+'-'+Math.random().toString(36).slice(2,7), cameraId:cid, hotel:document.getElementById('eHotel').value, status:document.getElementById('eStatus').value, location:document.getElementById('eLoc').value.trim(), model:'', notes:document.getElementById('eNotes').value, ticket:document.getElementById('eTicket').value, provider:document.getElementById('eProvider').value, quote:document.getElementById('eQuote').value, lat:pendingPin?pendingPin.lat:null, lng:pendingPin?pendingPin.lng:null, pinTs:pendingPin?pendingPin.ts:null, files:(camMe()==='Alexander Duff' ? [] : (pendingPhoto?[pendingPhoto]:[])) }; if(camMe()==='Alexander Duff' && pendingPhoto){ try{ stashCamFile(newCam.uid, pendingPhoto); }catch(e){} }
   msg.textContent='Adding...'; msg.style.color='#666';
   cameras.push(newCam);
   try{
@@ -680,7 +790,8 @@ function handleFileSelect(input, uid){
     const cam = cameras.find(c=>c.uid===uid);
     if(cam){
       if(!cam.files) cam.files = [];
-      cam.files.push({name:file.name, type:(dataUrl.match(/^data:([^;]+)/)||[])[1]||file.type, size:file.size, data:dataUrl, uploadedAt:new Date().toISOString(), uploadedBy:(function(){try{return sessionStorage.getItem('camUser')||'unknown';}catch(e){return 'unknown';}})()});
+      const __nf = {name:file.name, type:(dataUrl.match(/^data:([^;]+)/)||[])[1]||file.type, size:file.size, data:dataUrl, uploadedAt:new Date().toISOString(), uploadedBy:(function(){try{return sessionStorage.getItem('camUser')||localStorage.getItem('loewsUser')||'unknown';}catch(e){return 'unknown';}})()};
+      if(camMe() === 'Alexander Duff'){ stashCamFile(uid, __nf); } else { cam.files.push(__nf); }
       saveToCloud();
       refreshFileList(uid);
       var __inReport = false;
@@ -693,13 +804,17 @@ function refreshFileList(uid){
   const cam = cameras.find(c=>c.uid===uid);
   const div = document.getElementById('fileList');
   if(!div || !cam) return;
-  if(!cam.files || !cam.files.length){
+  var __local = (camMe() === 'Alexander Duff') ? localCamFiles(uid) : [];
+  if((!cam.files || !cam.files.length) && !__local.length){
     div.innerHTML = '<p style="color:#999;font-size:14.5px;">No files attached.</p>';
     return;
   }
   let h = '';
-  cam.files.forEach((f,i)=>{
+  (cam.files || []).forEach((f,i)=>{
     h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#f7fafc;border-radius:6px;margin-bottom:6px;"><span style="font-size:14.5px;">📎 '+escapeHtml(f.name)+' <span style="color:#999;">('+(f.size/1024).toFixed(1)+'KB)</span></span><span><a '+fileLinkAttr(f)+' download="'+escapeHtml(f.name)+'" style="padding:6px 12px;background:#2d4a7a;color:white;border-radius:4px;text-decoration:none;font-size:13.5px;">Download</a> <button onclick="removeFile(\''+uid+'\','+i+')" style="padding:6px 12px;background:#c53030;color:white;border:none;border-radius:4px;font-size:13.5px;cursor:pointer;">Remove</button></span></div>';
+  });
+  __local.forEach((f, j)=>{
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#f7fafc;border-radius:6px;margin-bottom:6px;"><span style="font-size:14.5px;">📎 '+escapeHtml(f.name)+' <span style="color:#999;">('+((f.size||0)/1024).toFixed(1)+'KB)</span></span><span><a href="'+f.data+'" download="'+escapeHtml(f.name)+'" style="padding:6px 12px;background:#2d4a7a;color:white;border-radius:4px;text-decoration:none;font-size:13.5px;">Download</a> <button onclick="removeLocalCamFile(\''+uid+'\','+j+')" style="padding:6px 12px;background:#c53030;color:white;border:none;border-radius:4px;font-size:13.5px;cursor:pointer;">Remove</button></span></div>';
   });
   div.innerHTML = h;
 }
